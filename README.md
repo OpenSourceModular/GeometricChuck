@@ -1,5 +1,5 @@
 # Geometric Chuck (Python)
-
+![Sample Screen](GeoChuck.png)
 A small Python app that simulates a geometric chuck with multiple gear stages and draws the resulting output path.
 
 When launched, the app opens directly into interactive mode using the `test` preset.

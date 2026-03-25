@@ -2,7 +2,10 @@
 ![Sample Screen](GeoChuck.png)
 A small Python app that simulates a geometric chuck with multiple gear stages and draws the resulting output path.
 
-When launched, the app opens directly into interactive mode using the `test` preset.
+This app is intended to simulate the Geometric Chuck function in the LatheEngraver Rose Engine plugin.
+https://github.com/paukstelis/OctoPrint-LatheEngraver
+
+The settings can be saved to a file 'saved_geos.json' in the same directory as the app. This file can be moved to the 'uploads\rosette' directory of the LatheEngraver(LE) and subsequently loaded into LE. Be careful to back up your current saved_geos.json file before doing this or you will overwrite it!
 
 ## What this app does
 
@@ -43,24 +46,3 @@ Interactive controls include:
 - Invert stage checkbox (flips the selected stage direction)
 - Turns slider (changes path length)
 - Reset and Save buttons
-
-The interactive editor always keeps at least 2 stages.
-
-## Editing gear stages
-
-Presets are defined near the top of `app.py` as a dictionary of stage lists.
-
-Each stage looks like:
-
-```python
-{"radius": 26.0, "p": -3.0, "q": 1.0, "phase": 20.0}
-```
-
-- `radius`: vector length contribution
-- `p`: numerator-like angular factor
-- `q`: denominator-like angular factor (cannot be `0`)
-- `phase`: fixed offset in degrees
-
-The stage ratio is computed as `p / q`. Negative values in `p` or `q` reverse rotational direction.
-
-Experiment by changing `p`, `q`, and phase values to discover new patterns.

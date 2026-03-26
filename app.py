@@ -24,7 +24,7 @@ from pathlib import Path
 import random
 
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Button, CheckButtons, Slider
+from matplotlib.widgets import Button, CheckButtons, RadioButtons, Slider
 
 from chuck import GeometricChuck, build_stages
 
@@ -44,7 +44,7 @@ def draw_interactive(
     min_stages = 2
     stage_data = [dict(item) for item in PRESETS[preset]]
     initial_stage_data = [dict(item) for item in PRESETS[preset]]
-    state = {"syncing_controls": False}
+    state = {"syncing_controls": False, "selected_stage": 0, "stage_menu_open": False}
 
     fig = plt.figure(figsize=(10, 9), dpi=120)
     fig.patch.set_facecolor("#f7f4ef")
@@ -67,11 +67,12 @@ def draw_interactive(
         ax.relim()
         ax.autoscale_view()
         ax.set_aspect("equal", adjustable="box")
-        selected_stage = int(stage_index_slider.val)
+        selected_stage = selected_index()
         ax.set_title(f"Geometric Chuck - {preset} (stage {selected_stage}/{len(stage_data) - 1})")
         fig.canvas.draw_idle()
 
-    ax_stage_index = fig.add_axes([0.10, 0.34, 0.56, 0.03], facecolor="#fdfcf8")
+    ax_stage_selector = fig.add_axes([0.10, 0.335, 0.20, 0.04])
+    ax_stage_menu = fig.add_axes([0.10, 0.38, 0.20, 0.12], facecolor="#fdfcf8")
     ax_radius = fig.add_axes([0.10, 0.29, 0.56, 0.03], facecolor="#fdfcf8")
     ax_p = fig.add_axes([0.10, 0.24, 0.56, 0.03], facecolor="#fdfcf8")
     ax_q = fig.add_axes([0.10, 0.19, 0.56, 0.03], facecolor="#fdfcf8")
@@ -82,17 +83,12 @@ def draw_interactive(
     ax_add_stage = fig.add_axes([0.72, 0.24, 0.10, 0.05])
     ax_delete_stage = fig.add_axes([0.84, 0.24, 0.10, 0.05])
 
-    stage_index_slider = Slider(
-        ax_stage_index,
-        "Stage",
-        0,
-        len(stage_data) - 1,
-        valinit=0,
-        valstep=1,
-    )
+    ax_stage_menu.set_visible(False)
+
+    stage_selector_button = Button(ax_stage_selector, "Stage 0")
     radius_slider = Slider(ax_radius, "Radius", 0.0, 100.0, valinit=stage_data[0]["radius"])
-    p_slider = Slider(ax_p, "p", -10.0, 10.0, valinit=stage_data[0]["p"])
-    q_slider = Slider(ax_q, "q", -10.0, 10.0, valinit=stage_data[0]["q"])
+    p_slider = Slider(ax_p, "p", -32.0, 32.0, valinit=stage_data[0]["p"])
+    q_slider = Slider(ax_q, "q", -32.0, 32.0, valinit=stage_data[0]["q"])
     phase_slider = Slider(ax_phase, "Phase", -180.0, 180.0, valinit=stage_data[0]["phase"])
     turns_slider = Slider(ax_turns, "Turns", 1.0, 200.0, valinit=turns)
     integer_toggle = CheckButtons(ax_integer_toggle, ["Integerize stage vars"], [True])
@@ -113,28 +109,51 @@ def draw_interactive(
     save_button = Button(ax_save, "Save")
 
     def selected_index() -> int:
-        return int(stage_index_slider.val)
+        return int(state["selected_stage"])
 
     def clamp_stage_value(value: int) -> int:
         return max(0, min(len(stage_data) - 1, value))
 
-    def refresh_stage_selector(target_stage: int | None = None) -> None:
-        stage_index_slider.valmin = 0
-        stage_index_slider.valmax = len(stage_data) - 1
-        stage_index_slider.valstep = 1
-        ax_stage_index.set_xlim(0, len(stage_data) - 1)
+    def stage_label(index: int) -> str:
+        return f"Stage {index}"
 
+    def set_stage_menu_open(is_open: bool) -> None:
+        state["stage_menu_open"] = is_open
+        ax_stage_menu.set_visible(is_open)
+        fig.canvas.draw_idle()
+
+    def update_stage_selector_label() -> None:
+        stage_selector_button.label.set_text(stage_label(selected_index()))
+
+    def rebuild_stage_selector(target_stage: int) -> None:
+        labels = [stage_label(index) for index in range(len(stage_data))]
+        visible_options = min(max(len(labels), 1), 6)
+        menu_height = 0.04 * visible_options
+        ax_stage_menu.set_position([0.10, 0.38, 0.20, menu_height])
+        ax_stage_menu.clear()
+
+        stage_picker = RadioButtons(
+            ax_stage_menu,
+            labels,
+            active=target_stage,
+            activecolor="#083d77",
+        )
+        stage_picker.on_clicked(on_stage_selected)
+        state["stage_picker"] = stage_picker
+        update_stage_selector_label()
+        ax_stage_menu.set_visible(state["stage_menu_open"])
+
+    def refresh_stage_selector(target_stage: int | None = None) -> None:
         if target_stage is None:
-            target_stage = clamp_stage_value(int(round(stage_index_slider.val)))
+            target_stage = clamp_stage_value(selected_index())
         else:
             target_stage = clamp_stage_value(target_stage)
 
-        current_stage = int(round(stage_index_slider.val))
-        if current_stage != target_stage:
-            stage_index_slider.set_val(target_stage)
-        else:
-            sync_controls_from_stage()
-            update_plot()
+        state["selected_stage"] = target_stage
+        rebuild_stage_selector(target_stage)
+        set_stage_menu_open(False)
+        sync_controls_from_stage()
+        update_plot()
 
     def should_integerize() -> bool:
         return integer_toggle.get_status()[0]
@@ -226,6 +245,17 @@ def draw_interactive(
         sync_invert_toggle_from_stage()
         state["syncing_controls"] = False
 
+    def on_stage_selected(label: str | None) -> None:
+        if label is None:
+            return
+
+        target_stage = clamp_stage_value(int(label.rsplit(" ", 1)[-1]))
+        state["selected_stage"] = target_stage
+        update_stage_selector_label()
+        set_stage_menu_open(False)
+        sync_controls_from_stage()
+        update_plot()
+
     def update_stage_from_controls(_value: object = None) -> None:
         if state["syncing_controls"]:
             return
@@ -259,14 +289,17 @@ def draw_interactive(
         state["syncing_controls"] = False
         update_plot()
 
-    def on_stage_change(_value: float) -> None:
-        clamped_stage = clamp_stage_value(int(round(stage_index_slider.val)))
-        if int(round(stage_index_slider.val)) != clamped_stage:
-            stage_index_slider.set_val(clamped_stage)
+    def on_stage_button_click(_event: object) -> None:
+        set_stage_menu_open(not state["stage_menu_open"])
+
+    def on_canvas_click(event: object) -> None:
+        if not state["stage_menu_open"]:
             return
 
-        sync_controls_from_stage()
-        update_plot()
+        if getattr(event, "inaxes", None) in {ax_stage_selector, ax_stage_menu}:
+            return
+
+        set_stage_menu_open(False)
 
     def on_add_stage(_event: object) -> None:
         idx = selected_index()
@@ -353,7 +386,7 @@ def draw_interactive(
         sync_controls_from_stage()
         update_plot()
 
-    stage_index_slider.on_changed(on_stage_change)
+    stage_selector_button.on_clicked(on_stage_button_click)
     radius_slider.on_changed(update_stage_from_controls)
     p_slider.on_changed(update_stage_from_controls)
     q_slider.on_changed(update_stage_from_controls)
@@ -367,7 +400,9 @@ def draw_interactive(
     randomize_button.on_clicked(on_randomize)
     export_button.on_clicked(on_export)
     save_button.on_clicked(on_save)
+    fig.canvas.mpl_connect("button_press_event", on_canvas_click)
 
+    refresh_stage_selector(target_stage=0)
     update_plot()
     plt.show()
 

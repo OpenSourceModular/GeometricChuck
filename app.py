@@ -469,6 +469,8 @@ def draw_interactive(
     configure_axes()
     refresh_stage_selector(target_stage=0)
     update_plot()
+    fig_manager = plt.get_current_fig_manager()
+    fig_manager.set_window_title("Geometric Chuck")
     plt.show()
 
 

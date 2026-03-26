@@ -1,0 +1,28 @@
+[
+  {
+    "timestamp": "2026-03-26T10:33:22",
+    "type": "geometric",
+    "periods": 1,
+    "samples": 6000,
+    "stages": [
+      {
+        "p": -31,
+        "q": 1,
+        "radius": 88.0,
+        "phase": 0.0
+      },
+      {
+        "p": 1,
+        "q": 1,
+        "radius": 50.0,
+        "phase": 0.0
+      },
+      {
+        "p": 1,
+        "q": 1,
+        "radius": 70.0,
+        "phase": 0.0
+      }
+    ]
+  }
+]

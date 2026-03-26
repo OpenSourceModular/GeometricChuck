@@ -58,21 +58,40 @@ def draw_interactive(
     xs, ys = GeometricChuck(build_stages(stage_data)).sample_path(turns=turns, samples=samples)
     (line,) = ax.plot(xs, ys, color="#083d77", linewidth=0.5)
     ax.set_aspect("equal", adjustable="box")
+    polar_guides: list = []
 
     def configure_axes() -> None:
-        ax.spines["left"].set_position("zero")
-        ax.spines["bottom"].set_position("zero")
-        ax.spines["left"].set_color("#6b7280")
-        ax.spines["bottom"].set_color("#6b7280")
-        ax.spines["left"].set_linewidth(0.8)
-        ax.spines["bottom"].set_linewidth(0.8)
+        ax.spines["left"].set_visible(False)
+        ax.spines["bottom"].set_visible(False)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-        ax.xaxis.set_ticks_position("bottom")
-        ax.yaxis.set_ticks_position("left")
-        ax.tick_params(axis="both", colors="#6b7280", labelsize=8)
-        ax.set_xlabel("X", color="#6b7280")
-        ax.set_ylabel("Y", color="#6b7280", rotation=0, labelpad=10)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel("")
+        ax.set_ylabel("")
+
+        for guide in polar_guides:
+            guide.remove()
+        polar_guides.clear()
+
+        x_min, x_max = ax.get_xlim()
+        y_min, y_max = ax.get_ylim()
+        radius = min(abs(x_min), abs(x_max), abs(y_min), abs(y_max))
+        radius = max(radius, 1.0)
+
+        for angle_deg in range(0, 360, 45):
+            theta = math.radians(angle_deg)
+            x_end = radius * math.cos(theta)
+            y_end = radius * math.sin(theta)
+            (guide_line,) = ax.plot(
+                [0.0, x_end],
+                [0.0, y_end],
+                color="#9ca3af",
+                linewidth=0.6,
+                linestyle="--",
+                zorder=0,
+            )
+            polar_guides.append(guide_line)
 
     def update_plot() -> None:
         xs2, ys2 = build_path()

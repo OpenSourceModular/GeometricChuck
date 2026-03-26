@@ -101,6 +101,7 @@ def draw_interactive(
     ax_invert_toggle = fig.add_axes([0.70, 0.10, 0.26, 0.07], facecolor="#fdfcf8")
     ax_add_stage = fig.add_axes([0.72, 0.24, 0.10, 0.05])
     ax_delete_stage = fig.add_axes([0.84, 0.24, 0.10, 0.05])
+    ax_auto_turns = fig.add_axes([0.70, 0.30, 0.26, 0.06], facecolor="#fdfcf8")
 
     ax_stage_menu.set_visible(False)
 
@@ -114,6 +115,7 @@ def draw_interactive(
     invert_toggle = CheckButtons(ax_invert_toggle, ["Invert stage"], [False])
     add_stage_button = Button(ax_add_stage, "Add Stage")
     delete_stage_button = Button(ax_delete_stage, "Delete Stage")
+    auto_turns_toggle = CheckButtons(ax_auto_turns, ["Auto turns"], [True])
 
     ax_reset = fig.add_axes([0.70, 0.06, 0.06, 0.05])
     reset_button = Button(ax_reset, "Reset")
@@ -172,10 +174,26 @@ def draw_interactive(
         rebuild_stage_selector(target_stage)
         set_stage_menu_open(False)
         sync_controls_from_stage()
+        auto_set_turns()
         update_plot()
 
     def should_integerize() -> bool:
         return integer_toggle.get_status()[0]
+
+    def should_auto_turns() -> bool:
+        return auto_turns_toggle.get_status()[0]
+
+    def auto_set_turns() -> None:
+        if not should_auto_turns():
+            return
+        periods = compute_periods()
+        new_turns = float(max(1, min(periods, 1000)))
+        state["syncing_controls"] = True
+        if new_turns > turns_slider.valmax:
+            turns_slider.valmax = new_turns
+            turns_slider.ax.set_xlim(turns_slider.valmin, new_turns)
+        turns_slider.set_val(new_turns)
+        state["syncing_controls"] = False
 
     def is_stage_inverted(stage: dict) -> bool:
         return (stage["p"] < 0.0) != (stage["q"] < 0.0)
@@ -306,6 +324,7 @@ def draw_interactive(
         state["syncing_controls"] = True
         sync_invert_toggle_from_stage()
         state["syncing_controls"] = False
+        auto_set_turns()
         update_plot()
 
     def on_stage_button_click(_event: object) -> None:
@@ -339,7 +358,8 @@ def draw_interactive(
         stage_data[:] = [dict(stage) for stage in initial_stage_data]
 
         refresh_stage_selector(target_stage=0)
-        turns_slider.set_val(turns)
+        if not should_auto_turns():
+            turns_slider.set_val(turns)
 
     def on_randomize(_event: object) -> None:
         for index in range(len(stage_data)):
@@ -384,6 +404,7 @@ def draw_interactive(
 
     def on_integer_toggle(_label: str) -> None:
         sync_controls_from_stage()
+        auto_set_turns()
         update_plot()
 
     def on_invert_toggle(_label: str) -> None:
@@ -405,14 +426,19 @@ def draw_interactive(
         sync_controls_from_stage()
         update_plot()
 
+    def on_auto_turns_toggle(_label: str) -> None:
+        auto_set_turns()
+        update_plot()
+
     stage_selector_button.on_clicked(on_stage_button_click)
     radius_slider.on_changed(update_stage_from_controls)
     p_slider.on_changed(update_stage_from_controls)
     q_slider.on_changed(update_stage_from_controls)
     phase_slider.on_changed(update_stage_from_controls)
-    turns_slider.on_changed(lambda _value: update_plot())
+    turns_slider.on_changed(lambda _value: None if state["syncing_controls"] else update_plot())
     integer_toggle.on_clicked(on_integer_toggle)
     invert_toggle.on_clicked(on_invert_toggle)
+    auto_turns_toggle.on_clicked(on_auto_turns_toggle)
     add_stage_button.on_clicked(on_add_stage)
     delete_stage_button.on_clicked(on_delete_stage)
     reset_button.on_clicked(on_reset)
@@ -430,7 +456,7 @@ def draw_interactive(
 def main() -> None:
     draw_interactive(
         preset="Default",
-        turns=10.0,
+        turns=1.0,
         samples=6000,
         save_path=None,
     )

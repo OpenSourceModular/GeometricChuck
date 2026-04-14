@@ -22,9 +22,11 @@ import json
 import math
 from pathlib import Path
 import random
+import tkinter as tk
+from tkinter import messagebox, ttk
 
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Button, CheckButtons, RadioButtons, Slider
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 from chuck import GeometricChuck, build_stages
 
@@ -35,208 +37,233 @@ PRESETS: dict[str, list[dict]] = {
         {"radius": 26.0, "p": 9.0, "q": 3.0, "phase": 0.0},
     ],
 }
-def draw_interactive(
-    preset: str,
-    turns: float,
-    samples: int,
-    save_path: Path | None,
-) -> None:
-    min_stages = 2
-    stage_data = [dict(item) for item in PRESETS[preset]]
-    initial_stage_data = [dict(item) for item in PRESETS[preset]]
-    state = {"syncing_controls": False, "selected_stage": 0, "stage_menu_open": False}
 
-    fig = plt.figure(figsize=(10, 9), dpi=120)
-    fig.patch.set_facecolor("#f7f4ef")
-    ax = fig.add_axes([0.08, 0.38, 0.84, 0.57])
-    ax.set_facecolor("#fdfcf8")
 
-    def build_path() -> tuple[list[float], list[float]]:
-        chuck = GeometricChuck(build_stages(stage_data))
-        return chuck.sample_path(turns=turns_slider.val, samples=samples)
+class GeometricChuckTkApp:
+    def __init__(self, root: tk.Tk, preset: str, turns: float, samples: int, save_path: Path | None) -> None:
+        self.root = root
+        self.preset = preset
+        self.samples = samples
+        self.save_path = save_path
+        self.min_stages = 2
 
-    xs, ys = GeometricChuck(build_stages(stage_data)).sample_path(turns=turns, samples=samples)
-    (line,) = ax.plot(xs, ys, color="#083d77", linewidth=0.5)
-    ax.set_aspect("equal", adjustable="box")
-    polar_guides: list = []
+        self.stage_data = [dict(item) for item in PRESETS[preset]]
+        self.initial_stage_data = [dict(item) for item in PRESETS[preset]]
+        self.syncing_controls = False
 
-    def configure_axes() -> None:
-        ax.spines["left"].set_visible(False)
-        ax.spines["bottom"].set_visible(False)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_xlabel("")
-        ax.set_ylabel("")
+        self.selected_stage_var = tk.IntVar(value=0)
+        self.integerize_var = tk.BooleanVar(value=True)
+        self.invert_var = tk.BooleanVar(value=False)
+        self.auto_turns_var = tk.BooleanVar(value=True)
 
-        for guide in polar_guides:
-            guide.remove()
-        polar_guides.clear()
+        self.radius_var = tk.DoubleVar(value=self.stage_data[0]["radius"])
+        self.p_var = tk.DoubleVar(value=self.stage_data[0]["p"])
+        self.q_var = tk.DoubleVar(value=self.stage_data[0]["q"])
+        self.phase_var = tk.DoubleVar(value=self.stage_data[0]["phase"])
+        self.turns_var = tk.DoubleVar(value=turns)
+        self.initial_turns = turns
 
-        x_min, x_max = ax.get_xlim()
-        y_min, y_max = ax.get_ylim()
-        radius = min(abs(x_min), abs(x_max), abs(y_min), abs(y_max))
-        radius = max(radius, 1.0)
+        self.polar_guides: list = []
 
-        for angle_deg in range(0, 360, 45):
-            theta = math.radians(angle_deg)
-            x_end = radius * math.cos(theta)
-            y_end = radius * math.sin(theta)
-            (guide_line,) = ax.plot(
-                [0.0, x_end],
-                [0.0, y_end],
-                color="#9ca3af",
-                linewidth=0.6,
-                linestyle="--",
-                zorder=0,
-            )
-            polar_guides.append(guide_line)
+        self.root.title("Geometric Chuck")
+        self.root.configure(bg="#f7f4ef")
+        self.root.minsize(1200, 760)
 
-    def update_plot() -> None:
-        xs2, ys2 = build_path()
-        line.set_data(xs2, ys2)
-        line.set_linewidth(0.5)
-        max_x = max((abs(value) for value in xs2), default=1.0)
-        max_y = max((abs(value) for value in ys2), default=1.0)
-        x_limit = max(max_x * 1.05, 1.0)
-        y_limit = max(max_y * 1.05, 1.0)
-        ax.set_xlim(-x_limit, x_limit)
-        ax.set_ylim(-y_limit, y_limit)
-        ax.set_aspect("equal", adjustable="box")
-        configure_axes()
-        selected_stage = selected_index()
-        ax.set_title(f"Geometric Chuck - {preset} (stage {selected_stage}/{len(stage_data) - 1})")
-        fig.canvas.draw_idle()
+        self._build_layout()
+        self._build_controls()
+        self._build_plot_area()
+        self.refresh_stage_selector(target_stage=0)
 
-    ax_stage_selector = fig.add_axes([0.10, 0.335, 0.20, 0.04])
-    ax_stage_menu = fig.add_axes([0.10, 0.38, 0.20, 0.12], facecolor="#fdfcf8")
-    ax_radius = fig.add_axes([0.10, 0.29, 0.56, 0.03], facecolor="#fdfcf8")
-    ax_p = fig.add_axes([0.10, 0.24, 0.56, 0.03], facecolor="#fdfcf8")
-    ax_q = fig.add_axes([0.10, 0.19, 0.56, 0.03], facecolor="#fdfcf8")
-    ax_phase = fig.add_axes([0.10, 0.14, 0.56, 0.03], facecolor="#fdfcf8")
-    ax_turns = fig.add_axes([0.10, 0.09, 0.56, 0.03], facecolor="#fdfcf8")
-    ax_integer_toggle = fig.add_axes([0.70, 0.18, 0.26, 0.07], facecolor="#fdfcf8")
-    ax_invert_toggle = fig.add_axes([0.70, 0.10, 0.26, 0.07], facecolor="#fdfcf8")
-    ax_add_stage = fig.add_axes([0.72, 0.24, 0.10, 0.05])
-    ax_delete_stage = fig.add_axes([0.84, 0.24, 0.10, 0.05])
-    ax_auto_turns = fig.add_axes([0.70, 0.30, 0.26, 0.06], facecolor="#fdfcf8")
+    def _build_layout(self) -> None:
+        self.root.columnconfigure(0, weight=0)
+        self.root.columnconfigure(1, weight=1)
+        self.root.rowconfigure(0, weight=1)
 
-    ax_stage_menu.set_visible(False)
+        self.controls_frame = ttk.Frame(self.root, padding=12)
+        self.controls_frame.grid(row=0, column=0, sticky="ns")
 
-    stage_selector_button = Button(ax_stage_selector, "Stage 0")
-    radius_slider = Slider(ax_radius, "Radius", 0.0, 100.0, valinit=stage_data[0]["radius"])
-    p_slider = Slider(ax_p, "p", -32.0, 32.0, valinit=stage_data[0]["p"])
-    q_slider = Slider(ax_q, "q", -32.0, 32.0, valinit=stage_data[0]["q"])
-    phase_slider = Slider(ax_phase, "Phase", -180.0, 180.0, valinit=stage_data[0]["phase"])
-    turns_slider = Slider(ax_turns, "Turns", 1.0, 200.0, valinit=turns)
-    integer_toggle = CheckButtons(ax_integer_toggle, ["Integerize stage vars"], [True])
-    invert_toggle = CheckButtons(ax_invert_toggle, ["Invert stage"], [False])
-    add_stage_button = Button(ax_add_stage, "Add Stage")
-    delete_stage_button = Button(ax_delete_stage, "Delete Stage")
-    auto_turns_toggle = CheckButtons(ax_auto_turns, ["Auto turns"], [True])
+        self.plot_frame = ttk.Frame(self.root, padding=10)
+        self.plot_frame.grid(row=0, column=1, sticky="nsew")
+        self.plot_frame.columnconfigure(0, weight=1)
+        self.plot_frame.rowconfigure(0, weight=1)
 
-    ax_reset = fig.add_axes([0.70, 0.06, 0.06, 0.05])
-    reset_button = Button(ax_reset, "Reset")
+    def _build_controls(self) -> None:
+        row = 0
 
-    ax_randomize = fig.add_axes([0.77, 0.06, 0.06, 0.05])
-    randomize_button = Button(ax_randomize, "Random")
+        ttk.Label(self.controls_frame, text="Stage").grid(row=row, column=0, sticky="w")
+        row += 1
 
-    ax_export = fig.add_axes([0.84, 0.06, 0.06, 0.05])
-    export_button = Button(ax_export, "Export")
+        self.stage_selector = ttk.Combobox(self.controls_frame, state="readonly", width=20)
+        self.stage_selector.grid(row=row, column=0, sticky="ew", pady=(0, 8))
+        self.stage_selector.bind("<<ComboboxSelected>>", self.on_stage_selected)
+        row += 1
 
-    ax_save = fig.add_axes([0.91, 0.06, 0.06, 0.05])
-    save_button = Button(ax_save, "Save")
+        button_row = ttk.Frame(self.controls_frame)
+        button_row.grid(row=row, column=0, sticky="ew", pady=(0, 8))
+        ttk.Button(button_row, text="Add Stage", command=self.on_add_stage).pack(side="left", padx=(0, 4))
+        ttk.Button(button_row, text="Delete Stage", command=self.on_delete_stage).pack(side="left")
+        row += 1
 
-    def selected_index() -> int:
-        return int(state["selected_stage"])
+        self.radius_scale = self._make_scale(row, "Radius", self.radius_var, 0.0, 100.0, self.update_stage_from_controls)
+        row += 1
+        self.p_scale = self._make_scale(row, "p", self.p_var, -32.0, 32.0, self.update_stage_from_controls)
+        row += 1
+        self.q_scale = self._make_scale(row, "q", self.q_var, -32.0, 32.0, self.update_stage_from_controls)
+        row += 1
+        self.phase_scale = self._make_scale(row, "Phase", self.phase_var, -180.0, 180.0, self.update_stage_from_controls)
+        row += 1
+        self.turns_scale = self._make_scale(row, "Turns", self.turns_var, 1.0, 200.0, self.on_turns_changed)
+        row += 1
 
-    def clamp_stage_value(value: int) -> int:
-        return max(0, min(len(stage_data) - 1, value))
+        ttk.Checkbutton(
+            self.controls_frame,
+            text="Integerize stage vars",
+            variable=self.integerize_var,
+            command=self.on_integer_toggle,
+        ).grid(row=row, column=0, sticky="w", pady=(6, 0))
+        row += 1
 
-    def stage_label(index: int) -> str:
+        ttk.Checkbutton(
+            self.controls_frame,
+            text="Invert stage",
+            variable=self.invert_var,
+            command=self.on_invert_toggle,
+        ).grid(row=row, column=0, sticky="w")
+        row += 1
+
+        ttk.Checkbutton(
+            self.controls_frame,
+            text="Auto turns",
+            variable=self.auto_turns_var,
+            command=self.on_auto_turns_toggle,
+        ).grid(row=row, column=0, sticky="w", pady=(0, 8))
+        row += 1
+
+        actions_1 = ttk.Frame(self.controls_frame)
+        actions_1.grid(row=row, column=0, sticky="ew", pady=(0, 4))
+        ttk.Button(actions_1, text="Reset", command=self.on_reset).pack(side="left", padx=(0, 4))
+        ttk.Button(actions_1, text="Random", command=self.on_randomize).pack(side="left", padx=(0, 4))
+        ttk.Button(actions_1, text="Export", command=self.on_export).pack(side="left")
+        row += 1
+
+        actions_2 = ttk.Frame(self.controls_frame)
+        actions_2.grid(row=row, column=0, sticky="ew")
+        ttk.Button(actions_2, text="SVG", command=self.on_export_svg).pack(side="left", padx=(0, 4))
+        ttk.Button(actions_2, text="Save", command=self.on_save).pack(side="left")
+
+    def _build_plot_area(self) -> None:
+        self.figure = Figure(figsize=(8.8, 6.8), dpi=110, facecolor="#f7f4ef")
+        self.ax = self.figure.add_subplot(111)
+        self.ax.set_facecolor("#fdfcf8")
+        (self.line,) = self.ax.plot([], [], color="#083d77", linewidth=0.5)
+
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.plot_frame)
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.grid(row=0, column=0, sticky="nsew")
+
+        self.configure_axes()
+
+    def _make_scale(
+        self,
+        row: int,
+        label: str,
+        variable: tk.DoubleVar,
+        min_value: float,
+        max_value: float,
+        callback,
+    ) -> tk.Scale:
+        frame = ttk.Frame(self.controls_frame)
+        frame.grid(row=row, column=0, sticky="ew", pady=2)
+        ttk.Label(frame, text=label).pack(anchor="w")
+        scale = tk.Scale(
+            frame,
+            orient="horizontal",
+            from_=min_value,
+            to=max_value,
+            resolution=0.1,
+            variable=variable,
+            command=lambda _value: callback(),
+            length=320,
+            bg="#f7f4ef",
+            highlightthickness=0,
+            troughcolor="#ddd6c9",
+        )
+        scale.pack(anchor="w")
+        return scale
+
+    def selected_index(self) -> int:
+        return int(self.selected_stage_var.get())
+
+    def clamp_stage_value(self, value: int) -> int:
+        return max(0, min(len(self.stage_data) - 1, value))
+
+    def stage_label(self, index: int) -> str:
         return f"Stage {index}"
 
-    def set_stage_menu_open(is_open: bool) -> None:
-        state["stage_menu_open"] = is_open
-        ax_stage_menu.set_visible(is_open)
-        fig.canvas.draw_idle()
+    def rebuild_stage_selector(self, target_stage: int) -> None:
+        labels = [self.stage_label(index) for index in range(len(self.stage_data))]
+        self.stage_selector["values"] = labels
+        self.selected_stage_var.set(target_stage)
+        self.stage_selector.set(self.stage_label(target_stage))
 
-    def update_stage_selector_label() -> None:
-        stage_selector_button.label.set_text(stage_label(selected_index()))
-
-    def rebuild_stage_selector(target_stage: int) -> None:
-        labels = [stage_label(index) for index in range(len(stage_data))]
-        visible_options = min(max(len(labels), 1), 6)
-        menu_height = 0.04 * visible_options
-        ax_stage_menu.set_position([0.10, 0.38, 0.20, menu_height])
-        ax_stage_menu.clear()
-
-        stage_picker = RadioButtons(
-            ax_stage_menu,
-            labels,
-            active=target_stage,
-            activecolor="#083d77",
-        )
-        stage_picker.on_clicked(on_stage_selected)
-        state["stage_picker"] = stage_picker
-        update_stage_selector_label()
-        ax_stage_menu.set_visible(state["stage_menu_open"])
-
-    def refresh_stage_selector(target_stage: int | None = None) -> None:
+    def refresh_stage_selector(self, target_stage: int | None = None) -> None:
         if target_stage is None:
-            target_stage = clamp_stage_value(selected_index())
+            target_stage = self.clamp_stage_value(self.selected_index())
         else:
-            target_stage = clamp_stage_value(target_stage)
+            target_stage = self.clamp_stage_value(target_stage)
 
-        state["selected_stage"] = target_stage
-        rebuild_stage_selector(target_stage)
-        set_stage_menu_open(False)
-        sync_controls_from_stage()
-        auto_set_turns()
-        update_plot()
+        self.selected_stage_var.set(target_stage)
+        self.rebuild_stage_selector(target_stage)
+        self.sync_controls_from_stage()
+        self.auto_set_turns()
+        self.update_plot()
 
-    def should_integerize() -> bool:
-        return integer_toggle.get_status()[0]
+    def should_integerize(self) -> bool:
+        return bool(self.integerize_var.get())
 
-    def should_auto_turns() -> bool:
-        return auto_turns_toggle.get_status()[0]
+    def should_auto_turns(self) -> bool:
+        return bool(self.auto_turns_var.get())
 
-    def auto_set_turns() -> None:
-        if not should_auto_turns():
+    def auto_set_turns(self) -> None:
+        if not self.should_auto_turns():
             return
-        periods = compute_periods()
-        new_turns = float(max(1, min(periods, 1000)))
-        state["syncing_controls"] = True
-        if new_turns > turns_slider.valmax:
-            turns_slider.valmax = new_turns
-            turns_slider.ax.set_xlim(turns_slider.valmin, new_turns)
-        turns_slider.set_val(new_turns)
-        state["syncing_controls"] = False
 
-    def is_stage_inverted(stage: dict) -> bool:
+        periods = self.compute_periods()
+        new_turns = float(max(1, min(periods, 1000)))
+
+        self.syncing_controls = True
+        if new_turns > float(self.turns_scale.cget("to")):
+            self.turns_scale.configure(to=new_turns)
+        self.turns_var.set(new_turns)
+        self.syncing_controls = False
+
+    def is_stage_inverted(self, stage: dict) -> bool:
         return (stage["p"] < 0.0) != (stage["q"] < 0.0)
 
-    def sync_invert_toggle_from_stage() -> None:
-        current_state = invert_toggle.get_status()[0]
-        desired_state = is_stage_inverted(stage_data[selected_index()])
-        if current_state != desired_state:
-            invert_toggle.set_active(0)
+    def sync_invert_toggle_from_stage(self) -> None:
+        desired_state = self.is_stage_inverted(self.stage_data[self.selected_index()])
+        self.invert_var.set(desired_state)
 
-    def sanitize_stage_values(radius_value: float, p_value: float, q_value: float, phase_value: float) -> tuple[float, float, float, float]:
-        if should_integerize():
+    def sanitize_stage_values(
+        self,
+        radius_value: float,
+        p_value: float,
+        q_value: float,
+        phase_value: float,
+    ) -> tuple[float, float, float, float]:
+        if self.should_integerize():
             radius_value = float(round(radius_value))
             p_value = float(round(p_value))
             q_value = float(round(q_value))
             phase_value = float(round(phase_value))
 
         if q_value == 0.0:
-            q_value = -1.0 if (p_value < 0.0 or q_slider.val < 0.0) else 1.0
+            q_value = -1.0 if (p_value < 0.0 or self.q_var.get() < 0.0) else 1.0
 
         return radius_value, p_value, q_value, phase_value
 
-    def random_nonzero_value() -> float:
-        if should_integerize():
+    def random_nonzero_value(self) -> float:
+        if self.should_integerize():
             choices = [value for value in range(-10, 11) if value != 0]
             return float(random.choice(choices))
 
@@ -245,24 +272,24 @@ def draw_interactive(
             q_value = random.uniform(-10.0, 10.0)
         return q_value
 
-    def random_stage() -> dict[str, float]:
-        if should_integerize():
+    def random_stage(self) -> dict[str, float]:
+        if self.should_integerize():
             return {
                 "radius": float(random.randint(0, 50)),
                 "p": float(random.randint(-10, 10)),
-                "q": random_nonzero_value(),
+                "q": self.random_nonzero_value(),
                 "phase": float(random.randint(0, 180)),
             }
 
         return {
             "radius": random.uniform(0.0, 50.0),
             "p": random.uniform(-10.0, 10.0),
-            "q": random_nonzero_value(),
+            "q": self.random_nonzero_value(),
             "phase": random.uniform(0.0, 180.0),
         }
 
-    def compute_periods() -> int:
-        multipliers = GeometricChuck(build_stages(stage_data)).angle_multipliers()
+    def compute_periods(self) -> int:
+        multipliers = GeometricChuck(build_stages(self.stage_data)).angle_multipliers()
         denominators = []
         for multiplier in multipliers:
             frac = Fraction(multiplier).limit_denominator(1000)
@@ -270,137 +297,218 @@ def draw_interactive(
         unique_denominators = set(denominators) or {1}
         return math.lcm(*unique_denominators)
 
-    def compact_number(value: float) -> int | float:
+    def compact_number(self, value: float) -> int | float:
         if float(value).is_integer():
             return int(value)
         return float(value)
 
-    def stage_entry(stage: dict) -> dict[str, int | float]:
+    def stage_entry(self, stage: dict) -> dict[str, int | float]:
         return {
-            "p": compact_number(stage["p"]),
-            "q": compact_number(stage["q"]),
+            "p": self.compact_number(stage["p"]),
+            "q": self.compact_number(stage["q"]),
             "radius": float(stage["radius"]),
             "phase": float(stage["phase"]),
         }
 
-    def sync_controls_from_stage() -> None:
-        idx = selected_index()
-        stage = stage_data[idx]
-        radius_value, p_value, q_value, phase_value = sanitize_stage_values(
-            stage["radius"], stage["p"], stage["q"], stage["phase"]
-        )
-        stage_data[idx]["radius"] = radius_value
-        stage_data[idx]["p"] = p_value
-        stage_data[idx]["q"] = q_value
-        stage_data[idx]["phase"] = phase_value
-        state["syncing_controls"] = True
-        radius_slider.set_val(radius_value)
-        p_slider.set_val(p_value)
-        q_slider.set_val(q_value)
-        phase_slider.set_val(phase_value)
-        sync_invert_toggle_from_stage()
-        state["syncing_controls"] = False
+    def build_path(self) -> tuple[list[float], list[float]]:
+        chuck = GeometricChuck(build_stages(self.stage_data))
+        return chuck.sample_path(turns=float(self.turns_var.get()), samples=self.samples)
 
-    def on_stage_selected(label: str | None) -> None:
-        if label is None:
+    def configure_axes(self) -> None:
+        self.ax.spines["left"].set_visible(False)
+        self.ax.spines["bottom"].set_visible(False)
+        self.ax.spines["top"].set_visible(False)
+        self.ax.spines["right"].set_visible(False)
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
+        self.ax.set_xlabel("")
+        self.ax.set_ylabel("")
+
+        for guide in self.polar_guides:
+            guide.remove()
+        self.polar_guides.clear()
+
+        x_min, x_max = self.ax.get_xlim()
+        y_min, y_max = self.ax.get_ylim()
+        radius = min(abs(x_min), abs(x_max), abs(y_min), abs(y_max))
+        radius = max(radius, 1.0)
+
+        for angle_deg in range(0, 360, 45):
+            theta = math.radians(angle_deg)
+            x_end = radius * math.cos(theta)
+            y_end = radius * math.sin(theta)
+            (guide_line,) = self.ax.plot(
+                [0.0, x_end],
+                [0.0, y_end],
+                color="#9ca3af",
+                linewidth=0.6,
+                linestyle="--",
+                zorder=0,
+            )
+            self.polar_guides.append(guide_line)
+
+    def update_plot(self) -> None:
+        xs2, ys2 = self.build_path()
+        self.line.set_data(xs2, ys2)
+        self.line.set_linewidth(0.5)
+
+        max_x = max((abs(value) for value in xs2), default=1.0)
+        max_y = max((abs(value) for value in ys2), default=1.0)
+        x_limit = max(max_x * 1.05, 1.0)
+        y_limit = max(max_y * 1.05, 1.0)
+
+        self.ax.set_xlim(-x_limit, x_limit)
+        self.ax.set_ylim(-y_limit, y_limit)
+        self.ax.set_aspect("equal", adjustable="box")
+        self.configure_axes()
+
+        selected_stage = self.selected_index()
+        self.ax.set_title(f"Geometric Chuck - {self.preset} (stage {selected_stage}/{len(self.stage_data) - 1})")
+        self.canvas.draw_idle()
+
+    def sync_controls_from_stage(self) -> None:
+        idx = self.selected_index()
+        stage = self.stage_data[idx]
+        radius_value, p_value, q_value, phase_value = self.sanitize_stage_values(
+            stage["radius"],
+            stage["p"],
+            stage["q"],
+            stage["phase"],
+        )
+        self.stage_data[idx]["radius"] = radius_value
+        self.stage_data[idx]["p"] = p_value
+        self.stage_data[idx]["q"] = q_value
+        self.stage_data[idx]["phase"] = phase_value
+
+        self.syncing_controls = True
+        self.radius_var.set(radius_value)
+        self.p_var.set(p_value)
+        self.q_var.set(q_value)
+        self.phase_var.set(phase_value)
+        self.sync_invert_toggle_from_stage()
+        self.syncing_controls = False
+
+    def on_stage_selected(self, _event: object = None) -> None:
+        label = self.stage_selector.get()
+        try:
+            target_stage = self.clamp_stage_value(int(label.rsplit(" ", 1)[-1]))
+        except (ValueError, IndexError):
             return
 
-        target_stage = clamp_stage_value(int(label.rsplit(" ", 1)[-1]))
-        state["selected_stage"] = target_stage
-        update_stage_selector_label()
-        set_stage_menu_open(False)
-        sync_controls_from_stage()
-        update_plot()
+        self.selected_stage_var.set(target_stage)
+        self.sync_controls_from_stage()
+        self.update_plot()
 
-    def update_stage_from_controls(_value: object = None) -> None:
-        if state["syncing_controls"]:
+    def update_stage_from_controls(self) -> None:
+        if self.syncing_controls:
             return
 
-        idx = selected_index()
-        radius_value, p_value, q_value, phase_value = sanitize_stage_values(
-            radius_slider.val,
-            p_slider.val,
-            q_slider.val,
-            phase_slider.val,
+        idx = self.selected_index()
+        radius_value, p_value, q_value, phase_value = self.sanitize_stage_values(
+            self.radius_var.get(),
+            self.p_var.get(),
+            self.q_var.get(),
+            self.phase_var.get(),
         )
+
         if (
-            radius_slider.val != radius_value
-            or p_slider.val != p_value
-            or q_slider.val != q_value
-            or phase_slider.val != phase_value
+            self.radius_var.get() != radius_value
+            or self.p_var.get() != p_value
+            or self.q_var.get() != q_value
+            or self.phase_var.get() != phase_value
         ):
-            state["syncing_controls"] = True
-            radius_slider.set_val(radius_value)
-            p_slider.set_val(p_value)
-            q_slider.set_val(q_value)
-            phase_slider.set_val(phase_value)
-            state["syncing_controls"] = False
+            self.syncing_controls = True
+            self.radius_var.set(radius_value)
+            self.p_var.set(p_value)
+            self.q_var.set(q_value)
+            self.phase_var.set(phase_value)
+            self.syncing_controls = False
 
-        stage_data[idx]["radius"] = radius_value
-        stage_data[idx]["p"] = p_value
-        stage_data[idx]["q"] = q_value
-        stage_data[idx]["phase"] = phase_value
-        state["syncing_controls"] = True
-        sync_invert_toggle_from_stage()
-        state["syncing_controls"] = False
-        auto_set_turns()
-        update_plot()
+        self.stage_data[idx]["radius"] = radius_value
+        self.stage_data[idx]["p"] = p_value
+        self.stage_data[idx]["q"] = q_value
+        self.stage_data[idx]["phase"] = phase_value
 
-    def on_stage_button_click(_event: object) -> None:
-        set_stage_menu_open(not state["stage_menu_open"])
+        self.syncing_controls = True
+        self.sync_invert_toggle_from_stage()
+        self.syncing_controls = False
 
-    def on_canvas_click(event: object) -> None:
-        if not state["stage_menu_open"]:
+        self.auto_set_turns()
+        self.update_plot()
+
+    def on_turns_changed(self) -> None:
+        if self.syncing_controls:
+            return
+        self.update_plot()
+
+    def on_add_stage(self) -> None:
+        idx = self.selected_index()
+        new_stage = dict(self.stage_data[idx])
+        self.stage_data.insert(idx + 1, new_stage)
+        self.refresh_stage_selector(target_stage=idx + 1)
+
+    def on_delete_stage(self) -> None:
+        if len(self.stage_data) <= self.min_stages:
+            messagebox.showinfo("Geometric Chuck", "Cannot delete stage: at least 2 stages are required.")
             return
 
-        if getattr(event, "inaxes", None) in {ax_stage_selector, ax_stage_menu}:
-            return
+        idx = self.selected_index()
+        self.stage_data.pop(idx)
+        self.refresh_stage_selector(target_stage=idx)
 
-        set_stage_menu_open(False)
+    def on_reset(self) -> None:
+        self.stage_data[:] = [dict(stage) for stage in self.initial_stage_data]
+        self.refresh_stage_selector(target_stage=0)
 
-    def on_add_stage(_event: object) -> None:
-        idx = selected_index()
-        new_stage = dict(stage_data[idx])
-        stage_data.insert(idx + 1, new_stage)
-        refresh_stage_selector(target_stage=idx + 1)
+        if not self.should_auto_turns():
+            self.syncing_controls = True
+            self.turns_var.set(self.initial_turns)
+            self.syncing_controls = False
+            self.update_plot()
 
-    def on_delete_stage(_event: object) -> None:
-        if len(stage_data) <= min_stages:
-            print("Cannot delete stage: at least 2 stages are required.")
-            return
+    def on_randomize(self) -> None:
+        for index in range(len(self.stage_data)):
+            self.stage_data[index] = self.random_stage()
 
-        idx = selected_index()
-        stage_data.pop(idx)
-        refresh_stage_selector(target_stage=idx)
+        self.refresh_stage_selector(target_stage=self.selected_index())
 
-    def on_reset(_event: object) -> None:
-        stage_data[:] = [dict(stage) for stage in initial_stage_data]
-
-        refresh_stage_selector(target_stage=0)
-        if not should_auto_turns():
-            turns_slider.set_val(turns)
-
-    def on_randomize(_event: object) -> None:
-        for index in range(len(stage_data)):
-            stage_data[index] = random_stage()
-
-        refresh_stage_selector(target_stage=selected_index())
-
-    def on_save(_event: object) -> None:
-        target = save_path if save_path is not None else Path("output") / f"{preset}_interactive.png"
+    def on_save(self) -> None:
+        target = self.save_path if self.save_path is not None else Path("output") / f"{self.preset}_interactive.png"
         target.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(target, bbox_inches="tight", pad_inches=0.2)
+        self.figure.savefig(target, bbox_inches="tight", pad_inches=0.2)
         print(f"Saved image to: {target}")
 
-    def on_export(_event: object) -> None:
-        update_stage_from_controls()
+    def on_export_svg(self) -> None:
+        xs2, ys2 = self.build_path()
+        pattern_fig = Figure(figsize=(8, 8), dpi=120)
+        pattern_ax = pattern_fig.add_axes([0.0, 0.0, 1.0, 1.0])
+        pattern_fig.patch.set_alpha(0.0)
+        pattern_ax.set_facecolor("none")
+        pattern_ax.plot(xs2, ys2, color="#083d77", linewidth=0.5)
+        pattern_ax.set_aspect("equal", adjustable="box")
+        pattern_ax.axis("off")
+
+        max_x = max((abs(value) for value in xs2), default=1.0)
+        max_y = max((abs(value) for value in ys2), default=1.0)
+        x_limit = max(max_x * 1.05, 1.0)
+        y_limit = max(max_y * 1.05, 1.0)
+        pattern_ax.set_xlim(-x_limit, x_limit)
+        pattern_ax.set_ylim(-y_limit, y_limit)
+
+        target = Path("output") / f"{self.preset}_interactive.svg"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        pattern_fig.savefig(target, format="svg", bbox_inches="tight", pad_inches=0.0, transparent=True)
+        print(f"Exported SVG to: {target}")
+
+    def on_export(self) -> None:
+        self.update_stage_from_controls()
 
         record = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "type": "geometric",
-            "periods": compute_periods(),
-            "samples": samples,
-            "stages": [stage_entry(stage) for stage in stage_data],
+            "periods": self.compute_periods(),
+            "samples": self.samples,
+            "stages": [self.stage_entry(stage) for stage in self.stage_data],
         }
 
         target = Path("saved_geos.json")
@@ -421,19 +529,20 @@ def draw_interactive(
 
         print(f"Exported settings to: {target}")
 
-    def on_integer_toggle(_label: str) -> None:
-        sync_controls_from_stage()
-        auto_set_turns()
-        update_plot()
+    def on_integer_toggle(self) -> None:
+        self.sync_controls_from_stage()
+        self.auto_set_turns()
+        self.update_plot()
 
-    def on_invert_toggle(_label: str) -> None:
-        if state["syncing_controls"]:
+    def on_invert_toggle(self) -> None:
+        if self.syncing_controls:
             return
 
-        idx = selected_index()
-        stage = stage_data[idx]
-        desired_inverted = invert_toggle.get_status()[0]
-        current_inverted = is_stage_inverted(stage)
+        idx = self.selected_index()
+        stage = self.stage_data[idx]
+        desired_inverted = bool(self.invert_var.get())
+        current_inverted = self.is_stage_inverted(stage)
+
         if desired_inverted == current_inverted:
             return
 
@@ -442,45 +551,24 @@ def draw_interactive(
         elif stage["q"] != 0.0:
             stage["q"] *= -1.0
 
-        sync_controls_from_stage()
-        update_plot()
+        self.sync_controls_from_stage()
+        self.update_plot()
 
-    def on_auto_turns_toggle(_label: str) -> None:
-        auto_set_turns()
-        update_plot()
-
-    stage_selector_button.on_clicked(on_stage_button_click)
-    radius_slider.on_changed(update_stage_from_controls)
-    p_slider.on_changed(update_stage_from_controls)
-    q_slider.on_changed(update_stage_from_controls)
-    phase_slider.on_changed(update_stage_from_controls)
-    turns_slider.on_changed(lambda _value: None if state["syncing_controls"] else update_plot())
-    integer_toggle.on_clicked(on_integer_toggle)
-    invert_toggle.on_clicked(on_invert_toggle)
-    auto_turns_toggle.on_clicked(on_auto_turns_toggle)
-    add_stage_button.on_clicked(on_add_stage)
-    delete_stage_button.on_clicked(on_delete_stage)
-    reset_button.on_clicked(on_reset)
-    randomize_button.on_clicked(on_randomize)
-    export_button.on_clicked(on_export)
-    save_button.on_clicked(on_save)
-    fig.canvas.mpl_connect("button_press_event", on_canvas_click)
-
-    configure_axes()
-    refresh_stage_selector(target_stage=0)
-    update_plot()
-    fig_manager = plt.get_current_fig_manager()
-    fig_manager.set_window_title("Geometric Chuck")
-    plt.show()
+    def on_auto_turns_toggle(self) -> None:
+        self.auto_set_turns()
+        self.update_plot()
 
 
 def main() -> None:
-    draw_interactive(
+    root = tk.Tk()
+    GeometricChuckTkApp(
+        root=root,
         preset="Default",
         turns=1.0,
         samples=6000,
         save_path=None,
     )
+    root.mainloop()
 
 
 if __name__ == "__main__":

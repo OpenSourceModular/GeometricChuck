@@ -41,6 +41,7 @@ Interactive controls include:
 - Delete stage button
 - Randomize button (randomizes all stages for the current stage count)
 - Export button (appends current settings to `saved_geos.json`)
+- SVG button (exports the current drawing to `output/Default_interactive.svg`)
 - Radius, p, q, and phase sliders for the selected stage
 - Integerize checkbox (forces Radius, p, q, and phase to integer values)
 - Invert stage checkbox (flips the selected stage direction)
